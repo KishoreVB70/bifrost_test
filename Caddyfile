@@ -1,0 +1,14 @@
+:{$APP_PORT:10000}
+
+@authenticated {
+	header Authorization "Bearer {$BIFROST_API_KEY}"
+}
+
+handle @authenticated {
+	reverse_proxy localhost:8080
+}
+
+respond 401 {
+	body "Unauthorized"
+	close
+}
