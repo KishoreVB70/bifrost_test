@@ -1,0 +1,61 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "client": {
+    "enforce_governance_header": true
+  },
+  "config_store": {
+    "enabled": true,
+    "type": "sqlite",
+    "config": {
+      "path": "/app/data/config.db"
+    }
+  },
+  "providers": {
+    "anthropic": {
+      "keys": [
+        {
+          "name": "anthropic-primary",
+          "value": "env.ANTHROPIC_API_KEY",
+          "models": [],
+          "weight": 1.0
+        }
+      ]
+    },
+    "openai": {
+      "keys": [
+        {
+          "name": "openai-primary",
+          "value": "env.OPENAI_API_KEY",
+          "models": [],
+          "weight": 1.0
+        }
+      ]
+    },
+    "gemini": {
+      "keys": [
+        {
+          "name": "gemini-primary",
+          "value": "env.GEMINI_API_KEY",
+          "models": [],
+          "weight": 1.0
+        }
+      ]
+    }
+  },
+  "governance": {
+    "virtual_keys": [
+      {
+        "id": "vk-001",
+        "name": "primary-access-key",
+        "value": "env.BIFROST_VIRTUAL_KEY",
+        "description": "Single access key for all providers",
+        "is_active": true,
+        "provider_configs": [
+          { "provider": "anthropic", "weight": 1.0 },
+          { "provider": "openai", "weight": 1.0 },
+          { "provider": "gemini", "weight": 1.0 }
+        ]
+      }
+    ]
+  }
+}
