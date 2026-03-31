@@ -1,4 +1,4 @@
-FROM maximhq/bifrost:v1.4.7
+FROM maximhq/bifrost:v1.4.18
 
 # Switch to root to copy files (image runs as non-root 'appuser')
 USER root
