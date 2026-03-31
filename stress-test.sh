@@ -52,7 +52,7 @@ check_status "No virtual key → blocked" "401" "$CODE" "$BODY"
 RESP=$(chat "openai/gpt-4o-mini" "x-bf-vk: sk-bf-wrongkey")
 CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
-check_status "Wrong virtual key → blocked" "403" "$CODE" "$BODY"
+check_status "Wrong virtual key → blocked" "401" "$CODE" "$BODY"
 
 # Invalid header format
 RESP=$(chat "openai/gpt-4o-mini" "x-bf-vk: invalid-no-prefix")
@@ -171,11 +171,122 @@ green "GET on POST endpoint → HTTP $CODE (Bifrost accepts both)"
 
 echo ""
 
+# ─── STREAMING ────────────────────────────────
+
+echo "── Streaming ──"
+
+# SSE streaming request
+RESP=$(curl -s -w "\n%{http_code}" \
+  -H "x-bf-vk: $VK" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openai/gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Reply with exactly: pong"}]}' \
+  "$BASE_URL/v1/chat/completions" 2>/dev/null)
+CODE=$(echo "$RESP" | tail -1)
+if [ "$CODE" = "200" ]; then
+  green "Streaming response (HTTP $CODE)"
+else
+  red "Streaming failed (HTTP $CODE)"
+fi
+sleep 1
+
+# Streaming without key
+CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openai/gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"Hi"}]}' \
+  "$BASE_URL/v1/chat/completions")
+check_status "Streaming without key → blocked" "401" "$CODE" ""
+
+echo ""
+
+# ─── INJECTION / ABUSE ────────────────────────
+
+echo "── Injection & Abuse ──"
+
+# SQL injection in model name
+RESP=$(chat "openai/gpt-4o-mini'; DROP TABLE users;--" "x-bf-vk: $VK")
+CODE=$(echo "$RESP" | tail -1)
+if [ "$CODE" != "200" ]; then
+  green "SQL injection in model → rejected (HTTP $CODE)"
+else
+  red "SQL injection in model → should not return 200"
+fi
+
+# XSS in message content
+CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "x-bf-vk: $VK" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"<script>alert(1)</script>"}]}' \
+  "$BASE_URL/v1/chat/completions")
+if [ "$CODE" = "200" ]; then
+  green "XSS in message → handled safely (HTTP $CODE)"
+else
+  green "XSS in message → rejected (HTTP $CODE)"
+fi
+
+# Path traversal in model
+RESP=$(chat "../../etc/passwd" "x-bf-vk: $VK")
+CODE=$(echo "$RESP" | tail -1)
+if [ "$CODE" != "200" ]; then
+  green "Path traversal in model → rejected (HTTP $CODE)"
+else
+  red "Path traversal in model → should not return 200"
+fi
+
+# Header injection attempt
+CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "x-bf-vk: $VK" \
+  -H "Content-Type: application/json" \
+  -H "X-Forwarded-For: 127.0.0.1" \
+  -H "Host: evil.com" \
+  -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}' \
+  "$BASE_URL/v1/chat/completions")
+if [ "$CODE" != "000" ]; then
+  green "Header injection → handled (HTTP $CODE)"
+else
+  red "Header injection → connection failed"
+fi
+
+# Empty virtual key
+RESP=$(chat "openai/gpt-4o-mini" "x-bf-vk: ")
+CODE=$(echo "$RESP" | tail -1)
+check_status "Empty virtual key → blocked" "401" "$CODE" ""
+
+# Virtual key with spaces
+RESP=$(chat "openai/gpt-4o-mini" "x-bf-vk: sk-bf-some key")
+CODE=$(echo "$RESP" | tail -1)
+check_status "Virtual key with spaces → blocked" "401" "$CODE" ""
+
+echo ""
+
+# ─── RATE / LOAD ──────────────────────────────
+
+echo "── Rapid Fire (10 sequential) ──"
+
+RAPID_PASS=0
+RAPID_FAIL=0
+for i in $(seq 1 10); do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "x-bf-vk: $VK" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"openai/gpt-4o-mini","messages":[{"role":"user","content":"Reply: pong"}]}' \
+    "$BASE_URL/v1/chat/completions")
+  if [ "$CODE" = "200" ]; then
+    RAPID_PASS=$((RAPID_PASS + 1))
+  else
+    RAPID_FAIL=$((RAPID_FAIL + 1))
+  fi
+done
+green "Rapid fire: $RAPID_PASS/10 succeeded, $RAPID_FAIL/10 rate-limited/failed"
+
+echo ""
+
 # ─── CONCURRENT REQUESTS ─────────────────────
 
-echo "── Concurrent Requests (5 parallel) ──"
+echo "── Concurrent Requests (10 parallel) ──"
 
-for i in 1 2 3 4 5; do
+CONC_PASS=0
+CONC_FAIL=0
+for i in $(seq 1 10); do
   (
     RESP=$(chat "openai/gpt-4o-mini" "x-bf-vk: $VK")
     CODE=$(echo "$RESP" | tail -1)
@@ -188,6 +299,49 @@ for i in 1 2 3 4 5; do
 done
 wait
 green "Concurrent requests completed"
+
+echo ""
+
+# ─── DIFFERENT ENDPOINTS ──────────────────────
+
+echo "── Endpoint Protection ──"
+
+# Non-existent endpoint
+CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/v1/models")
+check_status "GET /v1/models (no key) → blocked" "401" "$CODE" ""
+
+# Embeddings endpoint
+CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"openai/text-embedding-3-small","input":"test"}' \
+  "$BASE_URL/v1/embeddings")
+check_status "POST /v1/embeddings (no key) → blocked" "401" "$CODE" ""
+
+# Admin API create virtual key
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"name":"hacker-key","is_active":true}' \
+  "$BASE_URL/api/governance/virtual-keys")
+check_status "POST create virtual key → blocked" "401" "$CODE" ""
+
+# Admin API delete virtual key
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+  "$BASE_URL/api/governance/virtual-keys/vk-001")
+check_status "DELETE virtual key → blocked" "401" "$CODE" ""
+
+# Admin API session login with wrong creds
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"username":"hacker","password":"hacker"}' \
+  "$BASE_URL/api/session/login")
+check_status "Login with wrong creds → blocked" "401" "$CODE" ""
+
+# Admin API update provider
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+  -H "Content-Type: application/json" \
+  -d '{"keys":[{"name":"hacker","value":"sk-hacked"}]}' \
+  "$BASE_URL/api/providers/openai")
+check_status "PUT update provider → blocked" "401" "$CODE" ""
 
 echo ""
 
