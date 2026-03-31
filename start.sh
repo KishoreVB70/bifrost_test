@@ -30,7 +30,7 @@ done
 
 # Enable governance + dashboard auth via API — MUST succeed or refuse to run
 wget -qO- --method=PUT \
-  --body-data="{\"client_config\": {\"enable_governance\": true, \"enforce_governance_header\": true, \"log_retention_days\": 7}, \"auth_config\": {\"is_enabled\": true, \"disable_auth_on_inference\": true, \"admin_username\": \"${BIFROST_ADMIN_USER}\", \"admin_password\": \"${BIFROST_ADMIN_PASS}\"}}" \
+  --body-data="{\"client_config\": {\"enforce_auth_on_inference\": true, \"enforce_governance_header\": true, \"log_retention_days\": 7}, \"auth_config\": {\"is_enabled\": true, \"disable_auth_on_inference\": true, \"admin_username\": \"${BIFROST_ADMIN_USER}\", \"admin_password\": \"${BIFROST_ADMIN_PASS}\"}}" \
   --header='Content-Type: application/json' \
   http://127.0.0.1:${PORT}/api/config >/dev/null 2>&1 || {
   echo "FATAL: Failed to enable governance/auth — refusing to run without protection" >&2
